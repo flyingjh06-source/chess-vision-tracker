@@ -8,6 +8,7 @@ class ChessGameTracker:
         self.board = chess.Board()
         self.prev_board_img = None
         self.board_corners = None
+        self.auto_orientation = None
         self.error_count = 0
 
     def order_points(self, pts):
@@ -20,7 +21,16 @@ class ChessGameTracker:
         rect[3] = pts[np.argmax(diff)] # Bottom-left
         return rect
 
-    def process_frame(self, image_b64: str):
+    def auto_detect_orientation(self, warped):
+        means = {
+            '0': np.mean(warped[600:800, :]),    # Bottom has White
+            '180': np.mean(warped[0:200, :]),    # Top has White
+            '90': np.mean(warped[:, 600:800]),   # Right has White
+            '270': np.mean(warped[:, 0:200])     # Left has White
+        }
+        return max(means, key=means.get)
+
+    def process_frame(self, image_b64: str, orientation='0'):
         if ',' in image_b64:
             image_b64 = image_b64.split(',')[1]
         img_data = base64.b64decode(image_b64)
@@ -35,6 +45,7 @@ class ChessGameTracker:
 
         # 1. Detect Board Outline if not locked
         if self.board_corners is None:
+            self.auto_orientation = None
             blur = cv2.GaussianBlur(gray, (5, 5), 0)
             edges = cv2.Canny(blur, 50, 150)
             edges = cv2.dilate(edges, np.ones((5,5), np.uint8), iterations=1)
@@ -51,16 +62,31 @@ class ChessGameTracker:
                     break
             
             if not found:
-                # Fallback to whole image if no square found
                 self.board_corners = np.array([[0,0], [w,0], [w,h], [0,h]], dtype="float32")
 
-        # Prepare response object to include corners
         response = {"board_corners": self.board_corners.tolist()}
 
         # 2. Warp to perfect 800x800 orthogonal grid
         dst = np.array([[0,0], [800,0], [800,800], [0,800]], dtype="float32")
         M = cv2.getPerspectiveTransform(self.board_corners, dst)
         warped = cv2.warpPerspective(gray, M, (800, 800))
+        
+        # Apply user-defined or auto rotation to match White's perspective
+        if orientation == 'auto':
+            if getattr(self, 'auto_orientation', None) is None:
+                self.auto_orientation = self.auto_detect_orientation(warped)
+            active_orientation = self.auto_orientation
+            response["orientation"] = active_orientation
+        else:
+            self.auto_orientation = None
+            active_orientation = orientation
+
+        if active_orientation == '90':
+            warped = cv2.rotate(warped, cv2.ROTATE_90_CLOCKWISE)
+        elif active_orientation == '180':
+            warped = cv2.rotate(warped, cv2.ROTATE_180)
+        elif active_orientation == '270':
+            warped = cv2.rotate(warped, cv2.ROTATE_90_COUNTERCLOCKWISE)
         
         warped = cv2.GaussianBlur(warped, (15, 15), 0)
 
@@ -86,11 +112,10 @@ class ChessGameTracker:
         if total_changed > 100000:
             self.error_count += 1
             if self.error_count >= 3:
-                # Hard reset everything if stuck
-                self.prev_board_img = None
-                self.board_corners = None
+                # Only reset baseline image, keep manual corners!
+                self.prev_board_img = warped
                 self.error_count = 0
-                response["error"] = "Camera shifted. Recalibrating board..."
+                response["error"] = "Camera shifted. Baseline reset."
                 return response
             
             response["error"] = "Hand or obstacle detected"

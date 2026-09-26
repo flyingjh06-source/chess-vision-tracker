@@ -12,6 +12,7 @@ export default function MobileView() {
   const [boardCorners, setBoardCorners] = useState(null);
   const [manualCorners, setManualCorners] = useState([]);
   const [isManualSelecting, setIsManualSelecting] = useState(false);
+  const [orientation, setOrientation] = useState('auto');
   
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
@@ -34,6 +35,10 @@ export default function MobileView() {
       if (data.board_corners && !isManualSelecting) {
         setBoardCorners(data.board_corners);
       }
+      if (data.orientation && orientation === 'auto') {
+        const textMap = {'0': 'White at Bottom', '180': 'Black at Bottom', '90': 'White on Right', '270': 'White on Left'};
+        setStatus(`Auto-oriented: ${textMap[data.orientation] || data.orientation}`);
+      }
     };
 
     socket.on('scan_error', (data) => {
@@ -42,7 +47,7 @@ export default function MobileView() {
     });
 
     socket.on('scan_no_change', (data) => {
-      setStatus('No change detected.');
+      // Don't overwrite status if we just want to show no change, but we want to show auto-orientation.
       handleScanResult(data);
     });
 
@@ -58,7 +63,7 @@ export default function MobileView() {
       socket.off('scan_no_change');
       socket.off('scan_success');
     };
-  }, [isManualSelecting]);
+  }, [isManualSelecting, orientation]);
 
   useEffect(() => {
     if (connected) {
@@ -84,15 +89,14 @@ export default function MobileView() {
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
     
     const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
-    socket.emit('send_frame', { code, image: dataUrl });
-    setStatus('Scanning...');
+    socket.emit('send_frame', { code, image: dataUrl, orientation });
   };
 
   useEffect(() => {
     if (!gameStarted || mode !== 'auto' || isManualSelecting) return;
     const interval = setInterval(captureFrame, 5000);
     return () => clearInterval(interval);
-  }, [gameStarted, mode, code, isManualSelecting]);
+  }, [gameStarted, mode, code, isManualSelecting, orientation]);
 
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -102,7 +106,7 @@ export default function MobileView() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [gameStarted, mode, code, isManualSelecting]);
+  }, [gameStarted, mode, code, isManualSelecting, orientation]);
 
   const handleSvgClick = (e) => {
     if (!isManualSelecting) return;
@@ -130,7 +134,7 @@ export default function MobileView() {
     setIsManualSelecting(true);
     setManualCorners([]);
     setBoardCorners(null);
-    setStatus('Tap corner 1 of 4 (Top-Left)');
+    setStatus('Tap corner 1 of 4 (A8, or Top-Left)');
   };
 
   if (!connected) {
@@ -159,21 +163,34 @@ export default function MobileView() {
 
   return (
     <div className="h-screen bg-black flex flex-col relative">
-      <div className="bg-gray-900 text-white p-4 flex justify-between items-center z-10 shadow-lg">
-        <div className="text-sm font-semibold truncate max-w-xs flex-1">{status}</div>
-        {!isManualSelecting && (
-            <button onClick={startManualSelection} className="bg-blue-600 text-white text-xs p-2 rounded mx-2 shrink-0">
-              Manual Select
-            </button>
-        )}
-        <select 
-          value={mode}
-          onChange={(e) => setMode(e.target.value)}
-          className="bg-gray-800 text-white text-sm p-2 rounded border border-gray-700 outline-none shrink-0"
-        >
-          <option value="auto">Auto (5s)</option>
-          <option value="manual">Manual (Space)</option>
-        </select>
+      <div className="bg-gray-900 text-white p-4 flex flex-wrap gap-2 justify-between items-center z-10 shadow-lg">
+        <div className="text-sm font-semibold truncate w-full mb-1">{status}</div>
+        <div className="flex gap-2 w-full justify-between">
+            {!isManualSelecting && (
+                <button onClick={startManualSelection} className="bg-blue-600 text-white text-xs px-2 py-1 rounded shrink-0">
+                  Manual Select
+                </button>
+            )}
+            <select 
+              value={orientation}
+              onChange={(e) => { setOrientation(e.target.value); setStatus('Orientation changed. Scanning...'); captureFrame(); }}
+              className="bg-gray-800 text-white text-xs p-1 rounded border border-gray-700 outline-none shrink-0"
+            >
+              <option value="auto">Auto-Detect</option>
+              <option value="0">Behind White</option>
+              <option value="90">Left of White</option>
+              <option value="180">Behind Black</option>
+              <option value="270">Right of White</option>
+            </select>
+            <select 
+              value={mode}
+              onChange={(e) => setMode(e.target.value)}
+              className="bg-gray-800 text-white text-xs p-1 rounded border border-gray-700 outline-none shrink-0"
+            >
+              <option value="auto">Auto (5s)</option>
+              <option value="manual">Manual</option>
+            </select>
+        </div>
       </div>
 
       <div className="flex-1 relative overflow-hidden flex items-center justify-center">

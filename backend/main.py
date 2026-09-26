@@ -68,6 +68,7 @@ async def set_corners(sid, data):
         game_tracker = room['game']
         game_tracker.board_corners = np.array(corners, dtype="float32")
         game_tracker.prev_board_img = None # Reset baseline
+        game_tracker.auto_orientation = None
 
 
 @sio.event
@@ -81,7 +82,8 @@ async def send_frame(sid, data):
         game_tracker = room['game']
         
         # Process frame
-        result = game_tracker.process_frame(image_data)
+        orientation = data.get('orientation', '0')
+        result = game_tracker.process_frame(image_data, orientation=orientation)
         
         if result.get("error"):
             await sio.emit('scan_error', result, room=sid)
