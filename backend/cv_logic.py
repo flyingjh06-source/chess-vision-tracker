@@ -98,12 +98,30 @@ class ChessGameTracker:
         # 3. Brightness match & Diff
         mean_prev = cv2.mean(self.prev_board_img)[0]
         mean_curr = cv2.mean(warped)[0]
-        warped = cv2.convertScaleAbs(warped, alpha=1.0, beta=mean_prev - mean_curr)
-
-        diff = cv2.absdiff(self.prev_board_img, warped)
-        _, thresh = cv2.threshold(diff, 40, 255, cv2.THRESH_BINARY)
+        beta = int(mean_prev - mean_curr)
         
-        kernel = np.ones((7,7), np.uint8)
+        # Safely adjust brightness without absolute value folding
+        if beta > 0:
+            warped_adj = cv2.add(warped, np.array([beta], dtype=np.uint8))
+        elif beta < 0:
+            warped_adj = cv2.subtract(warped, np.array([-beta], dtype=np.uint8))
+        else:
+            warped_adj = warped.copy()
+
+        # Intensity diff (lowered threshold to catch camouflaged pieces)
+        diff_intensity = cv2.absdiff(self.prev_board_img, warped_adj)
+        _, thresh_intensity = cv2.threshold(diff_intensity, 25, 255, cv2.THRESH_BINARY)
+        
+        # Structural Edge diff (immune to camouflage and shadows)
+        edges_prev = cv2.Canny(self.prev_board_img, 40, 120)
+        edges_curr = cv2.Canny(warped_adj, 40, 120)
+        diff_edges = cv2.absdiff(edges_prev, edges_curr)
+        diff_edges = cv2.dilate(diff_edges, np.ones((5,5), np.uint8))
+        
+        # Combine intensity and structural changes
+        thresh = cv2.bitwise_or(thresh_intensity, diff_edges)
+        
+        kernel = np.ones((5,5), np.uint8)
         thresh = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel)
         
         total_changed = cv2.countNonZero(thresh)
@@ -123,7 +141,7 @@ class ChessGameTracker:
             
         self.error_count = 0
 
-        if total_changed < 2000:
+        if total_changed < 1000:
             response["no_change"] = True
             return response
 
@@ -141,7 +159,8 @@ class ChessGameTracker:
                 changes.append((changed_pixels, square_idx))
 
         changes.sort(key=lambda x: x[0], reverse=True)
-        top_squares = [s[1] for s in changes[:4] if s[0] > 500]
+        # INCLUDE ALL squares with significant changes, don't cap at 4 (shadows could push real moves down)
+        top_squares = [s[1] for s in changes if s[0] > 400]
         
         if len(top_squares) < 2:
             response["no_change"] = True
