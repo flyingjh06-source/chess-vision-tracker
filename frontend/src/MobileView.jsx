@@ -167,8 +167,11 @@ export default function MobileView() {
       <div className="bg-gray-900 text-white p-2 flex flex-wrap gap-2 justify-between items-center z-10 shadow-lg">
         <div className="text-sm font-semibold truncate w-full mb-1">{status}</div>
         <div className="flex gap-1 w-full justify-start overflow-x-auto pb-1">
+            <button onClick={() => socket.emit('reset_game', { code })} className="bg-red-600 hover:bg-red-700 text-white text-xs px-2 py-1 rounded shrink-0">
+              Reset Game
+            </button>
             {!isManualSelecting && (
-                <button onClick={startManualSelection} className="bg-blue-600 text-white text-xs px-2 py-1 rounded shrink-0">
+                <button onClick={startManualSelection} className="bg-blue-600 hover:bg-blue-700 text-white text-xs px-2 py-1 rounded shrink-0">
                   Manual Select
                 </button>
             )}

@@ -10,6 +10,7 @@ class ChessGameTracker:
         self.board_corners = None
         self.auto_orientation = None
         self.error_count = 0
+        self.current_border_inset = '0'
 
     def order_points(self, pts):
         rect = np.zeros((4, 2), dtype="float32")
@@ -31,6 +32,10 @@ class ChessGameTracker:
         return max(means, key=means.get)
 
     def process_frame(self, image_b64: str, orientation='0', border_inset='0'):
+        if self.current_border_inset != border_inset:
+            self.prev_board_img = None
+            self.current_border_inset = border_inset
+            
         if ',' in image_b64:
             image_b64 = image_b64.split(',')[1]
         img_data = base64.b64decode(image_b64)

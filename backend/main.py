@@ -70,6 +70,15 @@ async def set_corners(sid, data):
         game_tracker.prev_board_img = None # Reset baseline
         game_tracker.auto_orientation = None
 
+@sio.event
+async def reset_game(sid, data):
+    code = data.get('code')
+    if code in rooms and rooms[code].get('mobile_sid') == sid:
+        import chess
+        rooms[code]['game'].board = chess.Board()
+        rooms[code]['game'].prev_board_img = None
+        rooms[code]['game'].error_count = 0
+        await sio.emit('scan_error', {'message': 'Game reset to starting position.'}, room=sid)
 
 @sio.event
 async def send_frame(sid, data):
