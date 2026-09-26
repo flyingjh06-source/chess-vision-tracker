@@ -7,12 +7,20 @@ class ChessGameTracker:
     def __init__(self):
         self.board = chess.Board()
         self.prev_board_img = None
-        # Coordinates mapping for 8x8 grid (from A8 to H1)
-        # Note: In standard chess, A8 is top-left, H1 is bottom-right from White's perspective.
-        self.is_white_bottom = True
+        self.board_corners = None
+        self.error_count = 0
+
+    def order_points(self, pts):
+        rect = np.zeros((4, 2), dtype="float32")
+        s = pts.sum(axis=1)
+        rect[0] = pts[np.argmin(s)] # Top-left
+        rect[2] = pts[np.argmax(s)] # Bottom-right
+        diff = np.diff(pts, axis=1)
+        rect[1] = pts[np.argmin(diff)] # Top-right
+        rect[3] = pts[np.argmax(diff)] # Bottom-left
+        return rect
 
     def process_frame(self, image_b64: str):
-        # Decode base64 image
         if ',' in image_b64:
             image_b64 = image_b64.split(',')[1]
         img_data = base64.b64decode(image_b64)
@@ -22,33 +30,79 @@ class ChessGameTracker:
         if img is None:
             return {"error": "Invalid image"}
 
-        # Convert to grayscale
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        h, w = gray.shape
+
+        # 1. Detect Board Outline if not locked
+        if self.board_corners is None:
+            blur = cv2.GaussianBlur(gray, (5, 5), 0)
+            edges = cv2.Canny(blur, 50, 150)
+            edges = cv2.dilate(edges, np.ones((5,5), np.uint8), iterations=1)
+            contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            contours = sorted(contours, key=cv2.contourArea, reverse=True)
+            
+            found = False
+            for c in contours[:5]:
+                peri = cv2.arcLength(c, True)
+                approx = cv2.approxPolyDP(c, 0.03 * peri, True)
+                if len(approx) == 4:
+                    self.board_corners = self.order_points(approx.reshape(4, 2))
+                    found = True
+                    break
+            
+            if not found:
+                # Fallback to whole image if no square found
+                self.board_corners = np.array([[0,0], [w,0], [w,h], [0,h]], dtype="float32")
+
+        # Prepare response object to include corners
+        response = {"board_corners": self.board_corners.tolist()}
+
+        # 2. Warp to perfect 800x800 orthogonal grid
+        dst = np.array([[0,0], [800,0], [800,800], [0,800]], dtype="float32")
+        M = cv2.getPerspectiveTransform(self.board_corners, dst)
+        warped = cv2.warpPerspective(gray, M, (800, 800))
         
-        # In a real scenario, you'd find the 4 corners of the board here and warp it.
-        # For simplicity, assuming the image is mostly the board (cropped by mobile).
-        # We resize it to 800x800 for consistent 100x100 squares
-        warped = cv2.resize(gray, (800, 800))
-        
-        # Blur to reduce noise
-        warped = cv2.GaussianBlur(warped, (5, 5), 0)
+        warped = cv2.GaussianBlur(warped, (15, 15), 0)
 
         if self.prev_board_img is None:
             self.prev_board_img = warped
-            return {"no_change": True}
+            response["no_change"] = True
+            return response
 
-        # Compute difference
+        # 3. Brightness match & Diff
+        mean_prev = cv2.mean(self.prev_board_img)[0]
+        mean_curr = cv2.mean(warped)[0]
+        warped = cv2.convertScaleAbs(warped, alpha=1.0, beta=mean_prev - mean_curr)
+
         diff = cv2.absdiff(self.prev_board_img, warped)
-        _, thresh = cv2.threshold(diff, 30, 255, cv2.THRESH_BINARY)
+        _, thresh = cv2.threshold(diff, 40, 255, cv2.THRESH_BINARY)
         
-        # Check for hands (massive changes)
+        kernel = np.ones((7,7), np.uint8)
+        thresh = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel)
+        
         total_changed = cv2.countNonZero(thresh)
-        if total_changed > 150000: # Tune this threshold
-            return {"error": "Hand or obstacle detected"}
-        if total_changed < 2000:
-            return {"no_change": True}
+        
+        # 4. Error handling & Self-healing
+        if total_changed > 100000:
+            self.error_count += 1
+            if self.error_count >= 3:
+                # Hard reset everything if stuck
+                self.prev_board_img = None
+                self.board_corners = None
+                self.error_count = 0
+                response["error"] = "Camera shifted. Recalibrating board..."
+                return response
+            
+            response["error"] = "Hand or obstacle detected"
+            return response
+            
+        self.error_count = 0
 
-        # Calculate changes per square
+        if total_changed < 2000:
+            response["no_change"] = True
+            return response
+
+        # 5. Find Moved Squares
         square_size = 100
         changes = []
         for row in range(8):
@@ -56,50 +110,38 @@ class ChessGameTracker:
                 square_roi = thresh[row*square_size:(row+1)*square_size, col*square_size:(col+1)*square_size]
                 changed_pixels = cv2.countNonZero(square_roi)
                 
-                # Convert row, col to chess square index (0-63)
-                # If white is at the bottom:
-                # row 0 is rank 8, row 7 is rank 1
-                # col 0 is file A, col 7 is file H
                 rank = 7 - row
                 file_idx = col
                 square_idx = chess.square(file_idx, rank)
-                
                 changes.append((changed_pixels, square_idx))
 
-        # Sort by most changed
         changes.sort(key=lambda x: x[0], reverse=True)
-        
-        # Top 4 changed squares might be involved (e.g., castling)
         top_squares = [s[1] for s in changes[:4] if s[0] > 500]
         
         if len(top_squares) < 2:
-            return {"no_change": True}
+            response["no_change"] = True
+            return response
 
-        # Find legal moves that match the changed squares
         legal_moves = list(self.board.legal_moves)
         valid_moves = []
         
         for move in legal_moves:
             if move.from_square in top_squares and move.to_square in top_squares:
-                # Calculate score: sum of changed pixels at from_square and to_square
-                score = 0
-                for c in changes:
-                    if c[1] == move.from_square or c[1] == move.to_square:
-                        score += c[0]
+                score = sum([c[0] for c in changes if c[1] == move.from_square or c[1] == move.to_square])
                 valid_moves.append((score, move))
                 
         if valid_moves:
-            # Pick the move with the highest pixel change score
             valid_moves.sort(key=lambda x: x[0], reverse=True)
             best_move = valid_moves[0][1]
             
             self.board.push(best_move)
             self.prev_board_img = warped
-            return {
-                "moved": True,
-                "move": best_move.uci(),
-                "fen": self.board.fen(),
-                "is_game_over": self.board.is_game_over()
-            }
+            
+            response["moved"] = True
+            response["move"] = best_move.uci()
+            response["fen"] = self.board.fen()
+            response["is_game_over"] = self.board.is_game_over()
+            return response
         else:
-            return {"error": "Move not recognized as legal"}
+            response["error"] = "Move not recognized as legal"
+            return response

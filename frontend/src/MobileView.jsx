@@ -9,6 +9,7 @@ export default function MobileView() {
   const [gameStarted, setGameStarted] = useState(false);
   const [mode, setMode] = useState('auto'); // auto or manual
   const [status, setStatus] = useState('Waiting for PC to start game...');
+  const [boardCorners, setBoardCorners] = useState(null);
   
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
@@ -27,16 +28,25 @@ export default function MobileView() {
       setStatus('Game started! Scanning...');
     });
 
+    const handleScanResult = (data) => {
+      if (data.board_corners) {
+        setBoardCorners(data.board_corners);
+      }
+    };
+
     socket.on('scan_error', (data) => {
-      setStatus(`Error: ${data.message}`);
+      setStatus(`Error: ${data.error || data.message}`);
+      handleScanResult(data);
     });
 
-    socket.on('scan_no_change', () => {
+    socket.on('scan_no_change', (data) => {
       setStatus('No change detected.');
+      handleScanResult(data);
     });
 
     socket.on('scan_success', (data) => {
       setStatus(`Move detected: ${data.move}`);
+      handleScanResult(data);
     });
 
     return () => {
@@ -50,7 +60,6 @@ export default function MobileView() {
 
   useEffect(() => {
     if (connected) {
-      // Start camera
       navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
         .then(stream => {
           if (videoRef.current) {
@@ -61,40 +70,24 @@ export default function MobileView() {
     }
   }, [connected]);
 
-  // Handle capture
   const captureFrame = () => {
     if (!videoRef.current || !canvasRef.current) return;
     const canvas = canvasRef.current;
     const video = videoRef.current;
     
-    // Video dimensions
-    const vw = video.videoWidth;
-    const vh = video.videoHeight;
-    
-    // Determine the square size (shorter dimension)
-    const size = Math.min(vw, vh);
-    
-    // Calculate top-left corner of the center square
-    const startX = (vw - size) / 2;
-    const startY = (vh - size) / 2;
-    
-    canvas.width = size;
-    canvas.height = size;
-    
+    // Capture the entire video frame
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
     const ctx = canvas.getContext('2d');
-    // Draw only the perfectly centered square
-    ctx.drawImage(video, startX, startY, size, size, 0, 0, size, size);
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
     
-    // Get base64 string
     const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
-    
     socket.emit('send_frame', { code, image: dataUrl });
     setStatus('Scanning...');
   };
 
   useEffect(() => {
     if (!gameStarted || mode !== 'auto') return;
-    
     const interval = setInterval(captureFrame, 5000);
     return () => clearInterval(interval);
   }, [gameStarted, mode, code]);
@@ -109,10 +102,6 @@ export default function MobileView() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [gameStarted, mode, code]);
 
-  const handleJoin = () => {
-    socket.emit('join_room', { code });
-  };
-
   if (!connected) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-100 p-4">
@@ -120,15 +109,15 @@ export default function MobileView() {
           <h2 className="text-2xl font-bold mb-6 text-center text-gray-800">Connect to PC</h2>
           <input 
             type="text" 
-            placeholder="Enter 4-digit code" 
+            placeholder="4-digit code" 
             value={code}
             onChange={(e) => setCode(e.target.value)}
-            className="w-full text-center text-3xl tracking-widest font-mono p-4 border-2 border-gray-300 rounded-lg mb-6 focus:border-blue-500 focus:outline-none"
+            className="w-full text-center text-3xl tracking-widest font-mono p-4 border-2 border-gray-300 rounded-lg mb-6"
             maxLength={4}
           />
           <button 
-            onClick={handleJoin}
-            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 px-4 rounded-lg transition duration-200"
+            onClick={() => socket.emit('join_room', { code })}
+            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-lg"
           >
             Connect
           </button>
@@ -139,7 +128,6 @@ export default function MobileView() {
 
   return (
     <div className="h-screen bg-black flex flex-col relative">
-      {/* Status Bar */}
       <div className="bg-gray-900 text-white p-4 flex justify-between items-center z-10 shadow-lg">
         <div className="text-sm font-semibold truncate max-w-xs">{status}</div>
         <select 
@@ -152,26 +140,40 @@ export default function MobileView() {
         </select>
       </div>
 
-      {/* Camera View */}
       <div className="flex-1 relative overflow-hidden flex items-center justify-center">
         <video 
           ref={videoRef}
           autoPlay 
           playsInline 
-          className="w-full h-full object-cover opacity-80"
+          className="w-full h-full object-contain opacity-80"
         />
         
-        {/* Yellow Guide Rectangle - Perfect Square */}
-        <div className="absolute w-full aspect-square max-w-full max-h-full border-4 border-yellow-400 border-dashed flex items-center justify-center pointer-events-none shadow-[0_0_0_9999px_rgba(0,0,0,0.5)]">
-          <p className="bg-black bg-opacity-70 text-yellow-400 px-4 py-2 rounded font-bold">
-            Align Chessboard Here
-          </p>
-        </div>
+        {/* Dynamic Polygon showing automatically detected board */}
+        {boardCorners && videoRef.current && (
+          <svg 
+            className="absolute inset-0 w-full h-full pointer-events-none" 
+            viewBox={`0 0 ${videoRef.current.videoWidth} ${videoRef.current.videoHeight}`}
+            preserveAspectRatio="xMidYMid meet"
+          >
+            <polygon 
+              points={boardCorners.map(p => `${p[0]},${p[1]}`).join(' ')}
+              fill="rgba(255, 255, 0, 0.2)" 
+              stroke="yellow" 
+              strokeWidth="4" 
+              strokeDasharray="10 5"
+            />
+          </svg>
+        )}
+        
+        {!boardCorners && (
+           <p className="absolute text-yellow-400 font-bold bg-black bg-opacity-50 p-2 rounded">
+             Auto-detecting board...
+           </p>
+        )}
         
         <canvas ref={canvasRef} className="hidden" />
       </div>
 
-      {/* Manual Capture Button for Mobile */}
       {mode === 'manual' && gameStarted && (
         <div className="absolute bottom-8 left-0 right-0 flex justify-center z-10">
           <button 

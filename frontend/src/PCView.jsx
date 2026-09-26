@@ -18,7 +18,6 @@ export default function PCView() {
   const [customArrows, setCustomArrows] = useState([]);
 
   useEffect(() => {
-    // 소켓이 이미 연결된 상태라면 즉시 방을 만듭니다.
     if (socket.connected) {
       socket.emit('create_room');
     }

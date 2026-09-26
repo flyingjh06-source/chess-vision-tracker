@@ -13,8 +13,6 @@ socket_app = socketio.ASGIApp(sio, app)
 
 rooms = {}
 
-
-
 @sio.event
 async def connect(sid, environ):
     print(f"Client connected: {sid}")
