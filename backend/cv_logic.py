@@ -177,8 +177,8 @@ class ChessGameTracker:
                 changes.append((changed_pixels, square_idx))
 
         changes.sort(key=lambda x: x[0], reverse=True)
-        # INCLUDE ALL squares with significant changes, don't cap at 4 (shadows could push real moves down)
-        top_squares = [s[1] for s in changes if s[0] > 400]
+        # INCLUDE ALL squares with significant changes, lowered to 100 to catch thin edges of wooden pieces
+        top_squares = [s[1] for s in changes if s[0] > 100]
         
         if len(top_squares) < 2:
             response["no_change"] = True
