@@ -82,8 +82,9 @@ async def send_frame(sid, data):
         game_tracker = room['game']
         
         # Process frame
-        orientation = data.get('orientation', '0')
-        result = game_tracker.process_frame(image_data, orientation=orientation)
+        orientation = data.get('orientation', 'auto')
+        border_inset = data.get('border_inset', '0')
+        result = game_tracker.process_frame(image_data, orientation=orientation, border_inset=border_inset)
         
         if result.get("error"):
             await sio.emit('scan_error', result, room=sid)

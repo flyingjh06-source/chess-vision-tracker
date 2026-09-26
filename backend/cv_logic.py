@@ -30,7 +30,7 @@ class ChessGameTracker:
         }
         return max(means, key=means.get)
 
-    def process_frame(self, image_b64: str, orientation='0'):
+    def process_frame(self, image_b64: str, orientation='0', border_inset='0'):
         if ',' in image_b64:
             image_b64 = image_b64.split(',')[1]
         img_data = base64.b64decode(image_b64)
@@ -70,6 +70,19 @@ class ChessGameTracker:
         dst = np.array([[0,0], [800,0], [800,800], [0,800]], dtype="float32")
         M = cv2.getPerspectiveTransform(self.board_corners, dst)
         warped = cv2.warpPerspective(gray, M, (800, 800))
+        
+        # Apply border inset crop if the user tapped the outer wooden frame
+        try:
+            inset_val = float(border_inset)
+        except ValueError:
+            inset_val = 0.0
+            
+        inset_px = int(800 * inset_val)
+        if inset_px > 0:
+            pts1 = np.float32([[inset_px, inset_px], [800-inset_px, inset_px], [800-inset_px, 800-inset_px], [inset_px, 800-inset_px]])
+            pts2 = np.float32([[0,0], [800,0], [800,800], [0,800]])
+            M2 = cv2.getPerspectiveTransform(pts1, pts2)
+            warped = cv2.warpPerspective(warped, M2, (800, 800))
         
         # Apply user-defined or auto rotation to match White's perspective
         if orientation == 'auto':

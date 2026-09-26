@@ -13,6 +13,7 @@ export default function MobileView() {
   const [manualCorners, setManualCorners] = useState([]);
   const [isManualSelecting, setIsManualSelecting] = useState(false);
   const [orientation, setOrientation] = useState('auto');
+  const [borderInset, setBorderInset] = useState('0');
   
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
@@ -89,14 +90,14 @@ export default function MobileView() {
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
     
     const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
-    socket.emit('send_frame', { code, image: dataUrl, orientation });
+    socket.emit('send_frame', { code, image: dataUrl, orientation, border_inset: borderInset });
   };
 
   useEffect(() => {
     if (!gameStarted || mode !== 'auto' || isManualSelecting) return;
     const interval = setInterval(captureFrame, 5000);
     return () => clearInterval(interval);
-  }, [gameStarted, mode, code, isManualSelecting, orientation]);
+  }, [gameStarted, mode, code, isManualSelecting, orientation, borderInset]);
 
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -106,7 +107,7 @@ export default function MobileView() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [gameStarted, mode, code, isManualSelecting, orientation]);
+  }, [gameStarted, mode, code, isManualSelecting, orientation, borderInset]);
 
   const handleSvgClick = (e) => {
     if (!isManualSelecting) return;
@@ -163,14 +164,23 @@ export default function MobileView() {
 
   return (
     <div className="h-screen bg-black flex flex-col relative">
-      <div className="bg-gray-900 text-white p-4 flex flex-wrap gap-2 justify-between items-center z-10 shadow-lg">
+      <div className="bg-gray-900 text-white p-2 flex flex-wrap gap-2 justify-between items-center z-10 shadow-lg">
         <div className="text-sm font-semibold truncate w-full mb-1">{status}</div>
-        <div className="flex gap-2 w-full justify-between">
+        <div className="flex gap-1 w-full justify-start overflow-x-auto pb-1">
             {!isManualSelecting && (
                 <button onClick={startManualSelection} className="bg-blue-600 text-white text-xs px-2 py-1 rounded shrink-0">
                   Manual Select
                 </button>
             )}
+            <select 
+              value={borderInset}
+              onChange={(e) => { setBorderInset(e.target.value); setStatus('Border changed. Scanning...'); captureFrame(); }}
+              className="bg-gray-800 text-white text-xs p-1 rounded border border-gray-700 outline-none shrink-0"
+            >
+              <option value="0">No Border</option>
+              <option value="0.075">Wood Border (7.5%)</option>
+              <option value="0.1">Thick Border (10%)</option>
+            </select>
             <select 
               value={orientation}
               onChange={(e) => { setOrientation(e.target.value); setStatus('Orientation changed. Scanning...'); captureFrame(); }}
