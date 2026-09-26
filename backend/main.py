@@ -13,9 +13,7 @@ socket_app = socketio.ASGIApp(sio, app)
 
 rooms = {}
 
-@app.get("/")
-async def root():
-    return {"message": "Chess Vision Tracker API is running"}
+
 
 @sio.event
 async def connect(sid, environ):
