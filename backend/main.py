@@ -59,6 +59,18 @@ async def start_game(sid, data):
         await sio.emit('game_started', room=rooms[code]['mobile_sid'])
 
 @sio.event
+async def set_corners(sid, data):
+    code = data.get('code')
+    corners = data.get('corners')
+    import numpy as np
+    if code in rooms and rooms[code].get('mobile_sid') == sid:
+        room = rooms[code]
+        game_tracker = room['game']
+        game_tracker.board_corners = np.array(corners, dtype="float32")
+        game_tracker.prev_board_img = None # Reset baseline
+
+
+@sio.event
 async def send_frame(sid, data):
     # Mobile sends a frame
     code = data.get('code')
@@ -72,25 +84,14 @@ async def send_frame(sid, data):
         result = game_tracker.process_frame(image_data)
         
         if result.get("error"):
-            # Could be hand detected or board not found
-            await sio.emit('scan_error', {'message': result['error']}, room=sid)
+            await sio.emit('scan_error', result, room=sid)
         elif result.get("no_change"):
-            # No movement detected
-            await sio.emit('scan_no_change', room=sid)
+            await sio.emit('scan_no_change', result, room=sid)
         elif result.get("moved"):
-            move = result['move']
-            fen = result['fen']
-            is_game_over = result['is_game_over']
-            
             # Send move to PC
-            await sio.emit('move_detected', {
-                'move': move,
-                'fen': fen,
-                'is_game_over': is_game_over
-            }, room=room['pc_sid'])
-            
+            await sio.emit('move_detected', result, room=room['pc_sid'])
             # Send ack to Mobile
-            await sio.emit('scan_success', {'move': move}, room=sid)
+            await sio.emit('scan_success', result, room=sid)
 
 # Serve static files for frontend
 frontend_dist = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")

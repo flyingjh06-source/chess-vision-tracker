@@ -10,6 +10,8 @@ export default function MobileView() {
   const [mode, setMode] = useState('auto'); // auto or manual
   const [status, setStatus] = useState('Waiting for PC to start game...');
   const [boardCorners, setBoardCorners] = useState(null);
+  const [manualCorners, setManualCorners] = useState([]);
+  const [isManualSelecting, setIsManualSelecting] = useState(false);
   
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
@@ -29,7 +31,7 @@ export default function MobileView() {
     });
 
     const handleScanResult = (data) => {
-      if (data.board_corners) {
+      if (data.board_corners && !isManualSelecting) {
         setBoardCorners(data.board_corners);
       }
     };
@@ -56,7 +58,7 @@ export default function MobileView() {
       socket.off('scan_no_change');
       socket.off('scan_success');
     };
-  }, []);
+  }, [isManualSelecting]);
 
   useEffect(() => {
     if (connected) {
@@ -71,7 +73,7 @@ export default function MobileView() {
   }, [connected]);
 
   const captureFrame = () => {
-    if (!videoRef.current || !canvasRef.current) return;
+    if (!videoRef.current || !canvasRef.current || isManualSelecting) return;
     const canvas = canvasRef.current;
     const video = videoRef.current;
     
@@ -87,20 +89,49 @@ export default function MobileView() {
   };
 
   useEffect(() => {
-    if (!gameStarted || mode !== 'auto') return;
+    if (!gameStarted || mode !== 'auto' || isManualSelecting) return;
     const interval = setInterval(captureFrame, 5000);
     return () => clearInterval(interval);
-  }, [gameStarted, mode, code]);
+  }, [gameStarted, mode, code, isManualSelecting]);
 
   useEffect(() => {
     const handleKeyDown = (e) => {
-      if (e.code === 'Space' && gameStarted && mode === 'manual') {
+      if (e.code === 'Space' && gameStarted && mode === 'manual' && !isManualSelecting) {
         captureFrame();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [gameStarted, mode, code]);
+  }, [gameStarted, mode, code, isManualSelecting]);
+
+  const handleSvgClick = (e) => {
+    if (!isManualSelecting) return;
+    
+    const svg = e.currentTarget;
+    const pt = svg.createSVGPoint();
+    pt.x = e.clientX;
+    pt.y = e.clientY;
+    const svgP = pt.matrixTransform(svg.getScreenCTM().inverse());
+    
+    const newCorners = [...manualCorners, [svgP.x, svgP.y]];
+    setManualCorners(newCorners);
+    
+    if (newCorners.length === 4) {
+       socket.emit('set_corners', { code, corners: newCorners });
+       setBoardCorners(newCorners);
+       setIsManualSelecting(false);
+       setStatus('Manual corners set. Resuming scan...');
+    } else {
+       setStatus(`Tap corner ${newCorners.length + 1} of 4 (Top-Left, Top-Right, Bottom-Right, Bottom-Left)`);
+    }
+  };
+
+  const startManualSelection = () => {
+    setIsManualSelecting(true);
+    setManualCorners([]);
+    setBoardCorners(null);
+    setStatus('Tap corner 1 of 4 (Top-Left)');
+  };
 
   if (!connected) {
     return (
@@ -129,11 +160,16 @@ export default function MobileView() {
   return (
     <div className="h-screen bg-black flex flex-col relative">
       <div className="bg-gray-900 text-white p-4 flex justify-between items-center z-10 shadow-lg">
-        <div className="text-sm font-semibold truncate max-w-xs">{status}</div>
+        <div className="text-sm font-semibold truncate max-w-xs flex-1">{status}</div>
+        {!isManualSelecting && (
+            <button onClick={startManualSelection} className="bg-blue-600 text-white text-xs p-2 rounded mx-2 shrink-0">
+              Manual Select
+            </button>
+        )}
         <select 
           value={mode}
           onChange={(e) => setMode(e.target.value)}
-          className="bg-gray-800 text-white text-sm p-2 rounded border border-gray-700 outline-none"
+          className="bg-gray-800 text-white text-sm p-2 rounded border border-gray-700 outline-none shrink-0"
         >
           <option value="auto">Auto (5s)</option>
           <option value="manual">Manual (Space)</option>
@@ -148,20 +184,30 @@ export default function MobileView() {
           className="w-full h-full object-contain opacity-80"
         />
         
-        {/* Dynamic Polygon showing automatically detected board */}
-        {boardCorners && videoRef.current && (
+        {/* Dynamic Polygon showing detected or manual board */}
+        {videoRef.current && (
           <svg 
-            className="absolute inset-0 w-full h-full pointer-events-none" 
+            className={`absolute inset-0 w-full h-full ${isManualSelecting ? 'cursor-crosshair pointer-events-auto' : 'pointer-events-none'}`} 
             viewBox={`0 0 ${videoRef.current.videoWidth} ${videoRef.current.videoHeight}`}
             preserveAspectRatio="xMidYMid meet"
+            onClick={handleSvgClick}
+            style={{ zIndex: 20 }}
           >
-            <polygon 
-              points={boardCorners.map(p => `${p[0]},${p[1]}`).join(' ')}
-              fill="rgba(255, 255, 0, 0.2)" 
-              stroke="yellow" 
-              strokeWidth="4" 
-              strokeDasharray="10 5"
-            />
+            {/* Draw confirmed corners */}
+            {boardCorners && (
+                <polygon 
+                  points={boardCorners.map(p => `${p[0]},${p[1]}`).join(' ')}
+                  fill="rgba(255, 255, 0, 0.2)" 
+                  stroke="yellow" 
+                  strokeWidth="4" 
+                  strokeDasharray="10 5"
+                />
+            )}
+            
+            {/* Draw dots for manual selection */}
+            {isManualSelecting && manualCorners.map((p, i) => (
+                <circle key={i} cx={p[0]} cy={p[1]} r="10" fill="red" />
+            ))}
           </svg>
         )}
         
