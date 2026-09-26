@@ -67,12 +67,23 @@ export default function MobileView() {
     const canvas = canvasRef.current;
     const video = videoRef.current;
     
-    // Set canvas dimensions to match video
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
+    // Video dimensions
+    const vw = video.videoWidth;
+    const vh = video.videoHeight;
+    
+    // Determine the square size (shorter dimension)
+    const size = Math.min(vw, vh);
+    
+    // Calculate top-left corner of the center square
+    const startX = (vw - size) / 2;
+    const startY = (vh - size) / 2;
+    
+    canvas.width = size;
+    canvas.height = size;
     
     const ctx = canvas.getContext('2d');
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    // Draw only the perfectly centered square
+    ctx.drawImage(video, startX, startY, size, size, 0, 0, size, size);
     
     // Get base64 string
     const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
@@ -150,9 +161,9 @@ export default function MobileView() {
           className="w-full h-full object-cover opacity-80"
         />
         
-        {/* Yellow Guide Rectangle */}
-        <div className="absolute inset-4 sm:inset-10 border-4 border-yellow-400 border-dashed rounded flex items-center justify-center pointer-events-none">
-          <p className="bg-black bg-opacity-50 text-yellow-400 px-4 py-2 rounded font-bold">
+        {/* Yellow Guide Rectangle - Perfect Square */}
+        <div className="absolute w-full aspect-square max-w-full max-h-full border-4 border-yellow-400 border-dashed flex items-center justify-center pointer-events-none shadow-[0_0_0_9999px_rgba(0,0,0,0.5)]">
+          <p className="bg-black bg-opacity-70 text-yellow-400 px-4 py-2 rounded font-bold">
             Align Chessboard Here
           </p>
         </div>

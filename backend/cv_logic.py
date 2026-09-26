@@ -75,17 +75,24 @@ class ChessGameTracker:
         if len(top_squares) < 2:
             return {"no_change": True}
 
-        # Find a legal move that matches the changed squares
+        # Find legal moves that match the changed squares
         legal_moves = list(self.board.legal_moves)
-        best_move = None
+        valid_moves = []
         
         for move in legal_moves:
-            # For a normal move, from_square and to_square should both be in top_squares
             if move.from_square in top_squares and move.to_square in top_squares:
-                best_move = move
-                break
+                # Calculate score: sum of changed pixels at from_square and to_square
+                score = 0
+                for c in changes:
+                    if c[1] == move.from_square or c[1] == move.to_square:
+                        score += c[0]
+                valid_moves.append((score, move))
                 
-        if best_move:
+        if valid_moves:
+            # Pick the move with the highest pixel change score
+            valid_moves.sort(key=lambda x: x[0], reverse=True)
+            best_move = valid_moves[0][1]
+            
             self.board.push(best_move)
             self.prev_board_img = warped
             return {
